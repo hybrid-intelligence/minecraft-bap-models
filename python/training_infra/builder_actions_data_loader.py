@@ -130,6 +130,7 @@ class BuilderActionsDataset(CwCDataset):
         new_sample = copy.copy(sample)
         new_sample['prev_utterances'] = copy.copy(utterances)
         new_sample['question'] = True
+        new_sample['content_question'] = False
         # If we remove the next builder actions we destroy the __getitem__
         # interface.. However, we should probably do it to make sure we don't
         # provide the agent with too much information?
@@ -147,9 +148,13 @@ class BuilderActionsDataset(CwCDataset):
         for utterance in sample['prev_utterances']:
             if utterance['speaker'] == 'Builder' and '?' in utterance['utterance']:
                 new_sample = self.create_question_sample(sample, recreate_utterances)
+                if utterance['utterance'] not in [['like', 'that', '?'], ['like', 'this', '?'], ['like', 'so', '?']]:
+                    new_sample['content_question'] = True
+                    print(utterance['utterance'])
                 intermediate_samples.append(new_sample)
             recreate_utterances.append(utterance)
         sample['question'] = False
+        sample['content_question'] = False
         intermediate_samples.append(sample)
         return intermediate_samples
 
@@ -165,9 +170,13 @@ class BuilderActionsDataset(CwCDataset):
         for utterance in chat_diff:
             if utterance['speaker'] == 'Builder' and '?' in utterance['utterance']:
                 new_sample = self.create_question_sample(sample_new, recreate_utterances)
+                if utterance['utterance'] not in [['like', 'that', '?'], ['like', 'this', '?'], ['like', 'so', '?']]:
+                    new_sample['content_question'] = True
+                    print(utterance['utterance'])
                 intermediate_samples.append(new_sample)
             recreate_utterances.append(utterance)
         sample_new['question'] = False
+        sample_new['content_question'] = False
         intermediate_samples.append(sample_new)
         return intermediate_samples
 
@@ -338,7 +347,6 @@ class BuilderActionsDataset(CwCDataset):
                 i += 1
 
         prev_utterances = []
-
         for prev in utterances_to_add:
             speaker = prev["speaker"]
             utterance = prev["utterance"]
@@ -363,7 +371,8 @@ class BuilderActionsDataset(CwCDataset):
                 torch.stack(dec_inputs_2),
                 torch.Tensor(dec_outputs),
                 RawInputs(initial_prev_config_raw, initial_action_history_raw, end_built_config_raw, perspective_coords),
-                orig_sample['question']
+                orig_sample['question'],
+                orig_sample['content_question']
             )
         else:
             return (
@@ -377,7 +386,7 @@ class BuilderActionsDataset(CwCDataset):
     def collate_fn(self, data):
         # NOTE: assumes batch size = 1
         if self.split_questions:
-            prev_utterances, dec_inputs_1, dec_inputs_2, dec_outputs, raw_inputs, question_label = zip(*data)
+            prev_utterances, dec_inputs_1, dec_inputs_2, dec_outputs, raw_inputs, question_label, content_question = zip(*data)
         else:
             prev_utterances, dec_inputs_1, dec_inputs_2, dec_outputs, raw_inputs = zip(*data)
 
@@ -395,13 +404,24 @@ class BuilderActionsDataset(CwCDataset):
         dec_inputs_2 = torch.stack(dec_inputs_2)
         dec_outputs = torch.stack(dec_outputs)
 
-        return (
-            EncoderInputs(prev_utterances, prev_utterances_lengths),
-            dec_inputs_1,
-            dec_inputs_2,
-            dec_outputs,
-            raw_inputs[0]
-        )
+        if self.split_questions:
+            return (
+                EncoderInputs(prev_utterances, prev_utterances_lengths),
+                dec_inputs_1,
+                dec_inputs_2,
+                dec_outputs,
+                raw_inputs[0],
+                question_label,
+                content_question
+            )
+        else:
+            return (
+                EncoderInputs(prev_utterances, prev_utterances_lengths),
+                dec_inputs_1,
+                dec_inputs_2,
+                dec_outputs,
+                raw_inputs[0]
+            )
 
     def get_repr(self, builder_action, perspective_coords):
         # temporary fix: floats in configs # TODO: make sure this should be commented out
@@ -630,7 +650,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_builder_actions', default=False, action='store_true', help='include builder action tokens in the dialogue history')
 
     parser.add_argument('--add_perspective_coords', default=False, action='store_true', help='whether or not to include perspective coords in world state repr')
-    parser.add_argument('--split_questions', default=False, action='store_true', help='split the dataset also on question actions')
+    parser.add_argument('--split_questions', default=True, action='store_true', help='split the dataset also on question actions')
 
     args = parser.parse_args()
 
@@ -657,14 +677,12 @@ if __name__ == '__main__':
         saved_dataset_dir=args.saved_dataset_dir,
         load_dataset=True,
         encoder_vocab=encoder_vocab,
-
         items_only=True,
-        load_items=args.load_items,
+        load_items=False,
         dump_items=args.dump_items,
         development_mode=args.development_mode,
-        split_questions=args.split_questions
+        split_questions=True
     )
-
     # Format of item in dataset
     #     torch.Tensor(prev_utterances),
     #     torch.stack(dec_inputs_1),
@@ -672,6 +690,7 @@ if __name__ == '__main__':
     #     torch.Tensor(dec_outputs),
     #     RawInputs(initial_prev_config_raw, initial_action_history_raw, end_built_config_raw, perspective_coords)
     #     <question label>
+    #import pdb; pdb.set_trace()
     print(dataset[0][0])
     print(dataset[0][-1])
     print(dataset[0][-2].initial_prev_config_raw)

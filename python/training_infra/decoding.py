@@ -1,3 +1,5 @@
+import pdb
+
 import torch, sys, torch.nn as nn, re
 
 sys.path.append('..')
@@ -276,15 +278,14 @@ def beam_decode_action_seq(
 		prev_top_seqs = next_top_seqs[:beam_size]
 		next_top_seqs = []
 
+
 	terminal_seqs += [
 		([idx.item() for idx in seq.seq_idxes], seq.likelihoodScore(), seq.action_feasibilities, seq.built_config_post_last_action) for seq in prev_top_seqs
 	]
 	terminal_seqs.sort(key=lambda x: x[1], reverse=True)
-
 	# print(terminal_seqs)
-
 	if num_top_seqs is not None:
-		top_terminal_seqs = list(map(lambda x: (prune_seq(x[0], should_prune_seq(x[0])), prune_seq(x[2], should_prune_seq(x[0])), x[3]), terminal_seqs[:num_top_seqs]))
+		top_terminal_seqs = list(map(lambda x: (prune_seq(x[0], should_prune_seq(x[0])), prune_seq(x[2], should_prune_seq(x[0])), x[3], x[1]), terminal_seqs[:num_top_seqs]))
 	else:
 		top_terminal_seqs = list(map(lambda x: (prune_seq(x[0], should_prune_seq(x[0])), prune_seq(x[2], should_prune_seq(x[0])), x[3]), terminal_seqs))
 
@@ -304,7 +305,8 @@ def generate_action_pred_seq(encoder, decoder, test_item_batches, beam_size, max
 					break
 
 				# get the inputs; data is a list of [inputs, labels]
-				encoder_inputs, grid_repr_inputs, action_repr_inputs, labels, raw_inputs = data
+
+				encoder_inputs, grid_repr_inputs, action_repr_inputs, labels, raw_inputs, question_label, content_question = data
 				labels = labels.long()
 
 				if torch.cuda.is_available(): # TODO: remove cuda here?
@@ -319,14 +321,13 @@ def generate_action_pred_seq(encoder, decoder, test_item_batches, beam_size, max
 
 				generated_seq = beam_decode_action_seq(
 					decoder, grid_repr_inputs, action_repr_inputs, raw_inputs,
-					encoder_context, beam_size, max_length, testdataset, 1, # TODO: parameterize 1
+					encoder_context, beam_size, max_length, testdataset, 5, # TODO: parameterize 1
 					initial_grid_repr_input=grid_repr_inputs[0][0].unsqueeze(0),
 					masked_decoding=masked_decoding
 				) # list of tuples -- [(seq, feas, end_built_configs)]
 
 				# list(map(lambda x: x[0], generated_seq))
 				# list(map(lambda x: x[1], generated_seq))
-
 				generated_seqs.append(
 					{
 						"generated_seq": list(map(lambda x: x[0], generated_seq)),
@@ -334,12 +335,14 @@ def generate_action_pred_seq(encoder, decoder, test_item_batches, beam_size, max
 						"prev_utterances": encoder_inputs.prev_utterances,
 						"action_feasibilities": list(map(lambda x: x[1], generated_seq)),
 						"generated_end_built_config": list(map(lambda x: x[2], generated_seq)),
+						"seq_score": list(map(lambda x: x[3], generated_seq)),
 						"ground_truth_end_built_config": raw_inputs.end_built_config_raw,
 						"initial_built_config": raw_inputs.initial_prev_config_raw,
-						"initial_action_history": raw_inputs.initial_action_history_raw
+						"initial_action_history": raw_inputs.initial_action_history_raw,
+						"question_label": question_label,
+						"content_question": content_question
 					}
 				)
-
 				if i % 20 == 0:
 					print(
 						timestamp(),

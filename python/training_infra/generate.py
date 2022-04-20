@@ -35,6 +35,7 @@ def main(args, test_item_batches=None, testdataset=None, encoder_vocab=None):
         args_sfx += '-beam_'+str(args.beam_size)
         args_sfx += ('' if not args.masked_decoding else '-masked')
         output_path = os.path.join(args.model_dir, 'generated_sentences'+args_sfx+'.txt')
+        json_output_path = os.path.join(args.model_dir, 'generated_sentences'+args_sfx+'.json')
         output_path_generated_seqs = os.path.join(args.model_dir, 'generated_seqs_raw'+args_sfx+'-cpu.p') # TODO: what when output_path is not None?
     else:
         output_path = os.path.join(args.model_dir, output_path)
@@ -97,7 +98,8 @@ def main(args, test_item_batches=None, testdataset=None, encoder_vocab=None):
                 items_only=True,
                 load_items=False,
                 dump_items=False,
-                development_mode=args.development_mode
+                development_mode=args.development_mode,
+                split_questions=True
             )
             test_item_batches = testdataset.item_batches
 
@@ -126,7 +128,6 @@ def main(args, test_item_batches=None, testdataset=None, encoder_vocab=None):
 
     try:
         to_print = None
-
         if not args.eval_only:
             generated_seqs, to_print = generate_action_pred_seq(
                 encoder=models["encoder"], decoder=models["decoder"], test_item_batches=test_item_batches,
@@ -135,6 +136,7 @@ def main(args, test_item_batches=None, testdataset=None, encoder_vocab=None):
                 development_mode=args.development_mode,
                 masked_decoding=args.masked_decoding
             )
+
 
             # write generated seqs to disk
             print("\n"+timestamp(), "Pickling raw generated seqs to", print_dir(output_path_generated_seqs, 6), "...\n")
@@ -190,11 +192,15 @@ def main(args, test_item_batches=None, testdataset=None, encoder_vocab=None):
             generated_seq = format_generated_seq(output_obj["generated_seq"])
             ground_truth_seq = format_ground_truth_seq(output_obj["ground_truth_seq"])
             prev_utterances = format_prev_utterances(output_obj["prev_utterances"])
+
             return {
                 "generated_seq": generated_seq,
                 "ground_truth_seq": ground_truth_seq,
                 "prev_utterances": prev_utterances,
-                "action_feasibilities": output_obj["action_feasibilities"]
+                "action_feasibilities": output_obj["action_feasibilities"],
+                "question_label": output_obj["question_label"],
+                "score": [float(score) for score in output_obj["seq_score"]],
+                "content_question": output_obj["content_question"],
             }
 
         all_edit_distances = []
@@ -409,6 +415,8 @@ def main(args, test_item_batches=None, testdataset=None, encoder_vocab=None):
 
         generated_seqs_formatted = json.dumps(list(map(format, generated_seqs)), indent=4, separators= (",\n", ": "), sort_keys=True)
 
+        with open(json_output_path, 'w') as f:
+            f.write(generated_seqs_formatted)
         print("\n"+timestamp(), "Writing generated sentences to", print_dir(output_path, 6), "...\n")
 
         with open(output_path, 'w') as f:
